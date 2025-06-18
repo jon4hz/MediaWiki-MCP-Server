@@ -8,6 +8,12 @@ let cachedLoginToken: string | null = null;
 // Global variable to track login session state
 let isLoggedIn: boolean = false;
 
+// Global variable to store session cookies
+let sessionCookies: string[] = [];
+
+// Global variable to store edit token
+let cachedEditToken: string | null = null;
+
 // Interface for MediaWiki API login token response
 interface MediaWikiLoginTokenResponse {
 	query?: {
@@ -24,6 +30,15 @@ interface MediaWikiLoginResponse {
 		reason?: string;
 		lguserid?: number;
 		lgusername?: string;
+	};
+}
+
+// Interface for MediaWiki API edit token response
+interface MediaWikiEditTokenResponse {
+	query?: {
+		tokens?: {
+			csrftoken?: string;
+		};
 	};
 }
 
@@ -68,7 +83,9 @@ async function getLoginToken(): Promise<string | null> {
 // Function to clear cached token (in case of authentication failure)
 export function clearLoginToken(): void {
 	cachedLoginToken = null;
+	cachedEditToken = null;
 	isLoggedIn = false;
+	sessionCookies = [];
 }
 
 // Function to perform login request to establish session
@@ -104,6 +121,12 @@ async function loginRequest(): Promise<void> {
 			}
 		);
 
+		// Store session cookies from login response
+		const setCookieHeaders = response.headers.raw()[ 'set-cookie' ];
+		if ( setCookieHeaders ) {
+			sessionCookies = setCookieHeaders;
+		}
+
 		const data = await response.json() as MediaWikiLoginResponse;
 
 		// Check for login errors
@@ -114,12 +137,51 @@ async function loginRequest(): Promise<void> {
 
 		// Set login to be done
 		isLoggedIn = true;
+		// Clear the login token as it's no longer needed after successful login
+		cachedLoginToken = null;
+		// Clear any cached edit token so it gets refreshed
+		cachedEditToken = null;
 	} catch ( error ) {
 		// Clear cached token on login failure
 		cachedLoginToken = null;
+		cachedEditToken = null;
 		isLoggedIn = false;
 		throw new Error( `Login request failed: ${ ( error as Error ).message }` );
 	}
+}
+
+// Function to fetch edit token from MediaWiki (for authenticated operations)
+async function fetchEditToken(): Promise<string | null> {
+	try {
+		// Ensure we're logged in before getting edit token
+		await loginRequest();
+		
+		const response = await fetchCore(
+			`${ WIKI_SERVER() }${ SCRIPT_PATH() }/api.php`,
+			{
+				params: {
+					action: 'query',
+					meta: 'tokens',
+					format: 'json',
+					type: 'csrf'
+				}
+			}
+		);
+
+		const data = await response.json() as MediaWikiEditTokenResponse;
+		return data.query?.tokens?.csrftoken || null;
+	} catch ( error ) {
+		console.error( 'Failed to fetch edit token:', error );
+		return null;
+	}
+}
+
+// Function to get edit token (cached or fetch new one)
+export async function getEditToken(): Promise<string | null> {
+	if ( !cachedEditToken ) {
+		cachedEditToken = await fetchEditToken();
+	}
+	return cachedEditToken;
 }
 
 async function fetchCore(
@@ -160,6 +222,11 @@ async function fetchCore(
 		Object.assign( requestHeaders, options.headers );
 	}
 
+	// Add session cookies if available
+	if ( sessionCookies.length > 0 ) {
+		requestHeaders.Cookie = sessionCookies.join( '; ' );
+	}
+
 	const fetchOptions: { headers: Record<string, string>; method?: string; body?: string } = {
 		headers: requestHeaders,
 		method: options?.method || 'GET'
@@ -191,27 +258,15 @@ export async function makeApiRequest<T>(
 	params?: Record<string, string>,
 	needAuth: boolean = false
 ): Promise<T | null> {
-	let requestParams = params || {};
+	const requestParams = params || {};
 
 	// Add MediaWiki authentication parameters if needed
 	if ( needAuth ) {
 		// Ensure we're logged in before making authenticated requests
 		await loginRequest();
-
-		const wikiUsername = WIKI_USERNAME();
-		const wikiPassword = WIKI_PASSWORD();
-		const loginToken = await getLoginToken();
-
-		if ( wikiUsername && wikiPassword && loginToken ) {
-			requestParams = {
-				...requestParams,
-				lgname: wikiUsername,
-				lgpassword: wikiPassword,
-				lgtoken: loginToken
-			};
-		} else {
-			throw new Error( 'Wiki authentication credentials or token not available' );
-		}
+		
+		// After login, we rely on session cookies for authentication
+		// No need to send credentials with every request
 	}
 
 	const response = await fetchCore( url, {
@@ -231,25 +286,13 @@ export async function makeRestGetRequest<T>(
 	};
 
 	// Add MediaWiki authentication parameters if needed
-	let requestParams = params || {};
+	const requestParams = params || {};
 	if ( needAuth ) {
 		// Ensure we're logged in before making authenticated requests
 		await loginRequest();
-
-		const wikiUsername = WIKI_USERNAME();
-		const wikiPassword = WIKI_PASSWORD();
-		const loginToken = await getLoginToken();
-
-		if ( wikiUsername && wikiPassword && loginToken ) {
-			requestParams = {
-				...requestParams,
-				lgname: wikiUsername,
-				lgpassword: wikiPassword,
-				lgtoken: loginToken
-			};
-		} else {
-			throw new Error( 'Wiki authentication credentials or token not available' );
-		}
+		
+		// After login, we rely on session cookies for authentication
+		// No need to send credentials with every request
 	}
 
 	const response = await fetchCore( `${ WIKI_SERVER() }${ SCRIPT_PATH() }/rest.php${ path }`, {
@@ -269,27 +312,15 @@ export async function makeRestPutRequest<T>(
 		'Content-Type': 'application/json'
 	};
 
-	let requestBody = { ...body };
+	const requestBody = { ...body };
 
 	// Add MediaWiki authentication parameters if needed
 	if ( needAuth ) {
 		// Ensure we're logged in before making authenticated requests
 		await loginRequest();
-
-		const wikiUsername = WIKI_USERNAME();
-		const wikiPassword = WIKI_PASSWORD();
-		const loginToken = await getLoginToken();
-
-		if ( wikiUsername && wikiPassword && loginToken ) {
-			requestBody = {
-				...requestBody,
-				lgname: wikiUsername,
-				lgpassword: wikiPassword,
-				lgtoken: loginToken
-			};
-		} else {
-			throw new Error( 'Wiki authentication credentials or token not available' );
-		}
+		
+		// After login, we rely on session cookies for authentication
+		// No need to send credentials with every request
 	}
 
 	const response = await fetchCore( `${ WIKI_SERVER() }${ SCRIPT_PATH() }/rest.php${ path }`, {
@@ -310,27 +341,15 @@ export async function makeRestPostRequest<T>(
 		'Content-Type': 'application/json'
 	};
 
-	let requestBody = body ? { ...body } : {};
+	const requestBody = body ? { ...body } : {};
 
 	// Add MediaWiki authentication parameters if needed
 	if ( needAuth ) {
 		// Ensure we're logged in before making authenticated requests
 		await loginRequest();
-
-		const wikiUsername = WIKI_USERNAME();
-		const wikiPassword = WIKI_PASSWORD();
-		const loginToken = await getLoginToken();
-
-		if ( wikiUsername && wikiPassword && loginToken ) {
-			requestBody = {
-				...requestBody,
-				lgname: wikiUsername,
-				lgpassword: wikiPassword,
-				lgtoken: loginToken
-			};
-		} else {
-			throw new Error( 'Wiki authentication credentials or token not available' );
-		}
+		
+		// After login, we rely on session cookies for authentication
+		// No need to send credentials with every request
 	}
 
 	const response = await fetchCore( `${ WIKI_SERVER() }${ SCRIPT_PATH() }/rest.php${ path }`, {
