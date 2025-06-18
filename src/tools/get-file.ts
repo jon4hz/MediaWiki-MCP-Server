@@ -25,7 +25,7 @@ export function getFileTool( server: McpServer ): RegisteredTool {
 async function handleGetFileTool( title: string ): Promise< CallToolResult > {
 	let data: MwRestApiFileObject | null = null;
 	try {
-		data = await makeRestGetRequest<MwRestApiFileObject>( `/v1/file/${ encodeURIComponent( title ) }` );
+		data = await makeRestGetRequest<MwRestApiFileObject>( `/v1/file/${ encodeURIComponent( title ) }`, undefined, true );
 	} catch ( error ) {
 		return {
 			content: [

@@ -119,10 +119,31 @@ async function fetchCore(
 
 export async function makeApiRequest<T>(
 	url: string,
-	params?: Record<string, string>
+	params?: Record<string, string>,
+	needAuth: boolean = false
 ): Promise<T | null> {
+	let requestParams = params || {};
+
+	// Add MediaWiki authentication parameters if needed
+	if ( needAuth ) {
+		const wikiUsername = WIKI_USERNAME();
+		const wikiPassword = WIKI_PASSWORD();
+		const loginToken = await getLoginToken();
+
+		if ( wikiUsername && wikiPassword && loginToken ) {
+			requestParams = {
+				...requestParams,
+				lgname: wikiUsername,
+				lgpassword: wikiPassword,
+				lgtoken: loginToken
+			};
+		} else {
+			throw new Error( 'Wiki authentication credentials or token not available' );
+		}
+	}
+
 	const response = await fetchCore( url, {
-		params,
+		params: requestParams,
 		headers: { Accept: 'application/json' }
 	} );
 	return ( await response.json() ) as T;

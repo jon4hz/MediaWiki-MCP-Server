@@ -32,7 +32,8 @@ async function handleSearchPageTool( query: string, limit?: number ): Promise< C
 	try {
 		data = await makeRestGetRequest<MwRestApiSearchPageResponse>(
 			'/v1/search/page',
-			{ q: query, ...( limit ? { limit: limit.toString() } : {} ) }
+			{ q: query, ...( limit ? { limit: limit.toString() } : {} ) },
+			true
 		);
 	} catch ( error ) {
 		return {

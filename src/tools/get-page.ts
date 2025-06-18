@@ -46,7 +46,7 @@ async function handleGetPageTool( title: string, content: ContentFormat ): Promi
 	let data: MwRestApiPageObject | null = null;
 
 	try {
-		data = await makeRestGetRequest<MwRestApiPageObject>( `/v1/page/${ encodeURIComponent( title ) }${ subEndpoint }` );
+		data = await makeRestGetRequest<MwRestApiPageObject>( `/v1/page/${ encodeURIComponent( title ) }${ subEndpoint }`, undefined, true );
 	} catch ( error ) {
 		return {
 			content: [

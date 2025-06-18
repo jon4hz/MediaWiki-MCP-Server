@@ -48,7 +48,8 @@ async function handleGetPageHistoryTool(
 	try {
 		data = await makeRestGetRequest<MwRestApiGetPageHistoryResponse>(
 			`/v1/page/${ encodeURIComponent( title ) }/history`,
-			params
+			params,
+			true
 		);
 	} catch ( error ) {
 		return {

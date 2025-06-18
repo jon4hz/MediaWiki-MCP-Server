@@ -144,9 +144,15 @@ async function getWikiPathsFromApi(
 	let data: MediaWikiActionApiResponse | null = null;
 
 	try {
+		// First try without authentication
 		data = await makeApiRequest<MediaWikiActionApiResponse>( baseUrl, params );
 	} catch ( error ) {
-		// Suppress error to allow probing of other paths
+		// If that fails, try with authentication
+		try {
+			data = await makeApiRequest<MediaWikiActionApiResponse>( baseUrl, params, true );
+		} catch ( authError ) {
+			// Suppress error to allow probing of other paths
+		}
 	}
 
 	if ( data === null ) {
