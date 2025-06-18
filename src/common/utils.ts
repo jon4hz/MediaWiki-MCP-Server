@@ -5,12 +5,25 @@ import { SCRIPT_PATH, WIKI_SERVER, ARTICLE_PATH, BASIC_AUTH_USERNAME, BASIC_AUTH
 // Global variable to store the login token
 let cachedLoginToken: string | null = null;
 
+// Global variable to track login session state
+let isLoggedIn: boolean = false;
+
 // Interface for MediaWiki API login token response
 interface MediaWikiLoginTokenResponse {
 	query?: {
 		tokens?: {
 			logintoken?: string;
 		};
+	};
+}
+
+// Interface for MediaWiki API login response
+interface MediaWikiLoginResponse {
+	login?: {
+		result: string;
+		reason?: string;
+		lguserid?: number;
+		lgusername?: string;
 	};
 }
 
@@ -32,11 +45,6 @@ async function fetchLoginToken(): Promise<string | null> {
 					meta: 'tokens',
 					format: 'json',
 					type: 'login'
-				},
-				method: 'POST',
-				body: {
-					lgname: wikiUsername,
-					lgpassword: wikiPassword
 				}
 			}
 		);
@@ -60,6 +68,58 @@ async function getLoginToken(): Promise<string | null> {
 // Function to clear cached token (in case of authentication failure)
 export function clearLoginToken(): void {
 	cachedLoginToken = null;
+	isLoggedIn = false;
+}
+
+// Function to perform login request to establish session
+async function loginRequest(): Promise<void> {
+	// If already logged in, nothing further needs to be done
+	if ( isLoggedIn ) {
+		return;
+	}
+
+	const wikiUsername = WIKI_USERNAME();
+	const wikiPassword = WIKI_PASSWORD();
+	const loginToken = await getLoginToken();
+
+	if ( !wikiUsername || !wikiPassword || !loginToken ) {
+		throw new Error( 'Wiki credentials or login token not available' );
+	}
+
+	try {
+		const response = await fetchCore(
+			`${ WIKI_SERVER() }${ SCRIPT_PATH() }/api.php`,
+			{
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/x-www-form-urlencoded'
+				},
+				body: {
+					action: 'login',
+					lgname: wikiUsername,
+					lgpassword: wikiPassword,
+					lgtoken: loginToken,
+					format: 'json'
+				}
+			}
+		);
+
+		const data = await response.json() as MediaWikiLoginResponse;
+
+		// Check for login errors
+		if ( data.login?.result !== 'Success' ) {
+			const reason = data.login?.reason || 'Unknown error';
+			throw new Error( `Login failed: ${ reason }` );
+		}
+
+		// Set login to be done
+		isLoggedIn = true;
+	} catch ( error ) {
+		// Clear cached token on login failure
+		cachedLoginToken = null;
+		isLoggedIn = false;
+		throw new Error( `Login request failed: ${ ( error as Error ).message }` );
+	}
 }
 
 async function fetchCore(
@@ -105,7 +165,16 @@ async function fetchCore(
 		method: options?.method || 'GET'
 	};
 	if ( options?.body ) {
-		fetchOptions.body = JSON.stringify( options.body );
+		// Handle form data for login requests
+		if ( requestHeaders[ 'Content-Type' ] === 'application/x-www-form-urlencoded' ) {
+			const formData = new URLSearchParams();
+			for ( const [ key, value ] of Object.entries( options.body ) ) {
+				formData.append( key, String( value ) );
+			}
+			fetchOptions.body = formData.toString();
+		} else {
+			fetchOptions.body = JSON.stringify( options.body );
+		}
 	}
 	const response = await fetch( url, fetchOptions );
 	if ( !response.ok ) {
@@ -126,6 +195,9 @@ export async function makeApiRequest<T>(
 
 	// Add MediaWiki authentication parameters if needed
 	if ( needAuth ) {
+		// Ensure we're logged in before making authenticated requests
+		await loginRequest();
+
 		const wikiUsername = WIKI_USERNAME();
 		const wikiPassword = WIKI_PASSWORD();
 		const loginToken = await getLoginToken();
@@ -161,6 +233,9 @@ export async function makeRestGetRequest<T>(
 	// Add MediaWiki authentication parameters if needed
 	let requestParams = params || {};
 	if ( needAuth ) {
+		// Ensure we're logged in before making authenticated requests
+		await loginRequest();
+
 		const wikiUsername = WIKI_USERNAME();
 		const wikiPassword = WIKI_PASSWORD();
 		const loginToken = await getLoginToken();
@@ -198,6 +273,9 @@ export async function makeRestPutRequest<T>(
 
 	// Add MediaWiki authentication parameters if needed
 	if ( needAuth ) {
+		// Ensure we're logged in before making authenticated requests
+		await loginRequest();
+
 		const wikiUsername = WIKI_USERNAME();
 		const wikiPassword = WIKI_PASSWORD();
 		const loginToken = await getLoginToken();
@@ -236,6 +314,9 @@ export async function makeRestPostRequest<T>(
 
 	// Add MediaWiki authentication parameters if needed
 	if ( needAuth ) {
+		// Ensure we're logged in before making authenticated requests
+		await loginRequest();
+
 		const wikiUsername = WIKI_USERNAME();
 		const wikiPassword = WIKI_PASSWORD();
 		const loginToken = await getLoginToken();
