@@ -1,6 +1,66 @@
 import fetch, { Response } from 'node-fetch';
 import { USER_AGENT } from '../server.js';
-import { SCRIPT_PATH, WIKI_SERVER, OAUTH_TOKEN, ARTICLE_PATH } from './config.js';
+import { SCRIPT_PATH, WIKI_SERVER, ARTICLE_PATH, BASIC_AUTH_USERNAME, BASIC_AUTH_PASSWORD, WIKI_USERNAME, WIKI_PASSWORD } from './config.js';
+
+// Global variable to store the login token
+let cachedLoginToken: string | null = null;
+
+// Interface for MediaWiki API login token response
+interface MediaWikiLoginTokenResponse {
+	query?: {
+		tokens?: {
+			logintoken?: string;
+		};
+	};
+}
+
+// Function to fetch login token from MediaWiki
+async function fetchLoginToken(): Promise<string | null> {
+	const wikiUsername = WIKI_USERNAME();
+	const wikiPassword = WIKI_PASSWORD();
+
+	if ( !wikiUsername || !wikiPassword ) {
+		throw new Error( 'Wiki credentials not configured' );
+	}
+
+	try {
+		const response = await fetchCore(
+			`${ WIKI_SERVER() }${ SCRIPT_PATH() }/api.php`,
+			{
+				params: {
+					action: 'query',
+					meta: 'tokens',
+					format: 'json',
+					type: 'login'
+				},
+				method: 'POST',
+				body: {
+					lgname: wikiUsername,
+					lgpassword: wikiPassword
+				}
+			}
+		);
+
+		const data = await response.json() as MediaWikiLoginTokenResponse;
+		return data.query?.tokens?.logintoken || null;
+	} catch ( error ) {
+		console.error( 'Failed to fetch login token:', error );
+		return null;
+	}
+}
+
+// Function to get login token (cached or fetch new one)
+async function getLoginToken(): Promise<string | null> {
+	if ( !cachedLoginToken ) {
+		cachedLoginToken = await fetchLoginToken();
+	}
+	return cachedLoginToken;
+}
+
+// Function to clear cached token (in case of authentication failure)
+export function clearLoginToken(): void {
+	cachedLoginToken = null;
+}
 
 async function fetchCore(
 	baseUrl: string,
@@ -27,6 +87,14 @@ async function fetchCore(
 	const requestHeaders: Record<string, string> = {
 		'User-Agent': USER_AGENT
 	};
+
+	// Add basic authentication if credentials are available
+	const basicUsername = BASIC_AUTH_USERNAME();
+	const basicPassword = BASIC_AUTH_PASSWORD();
+	if ( basicUsername && basicPassword ) {
+		const credentials = Buffer.from( `${ basicUsername }:${ basicPassword }` ).toString( 'base64' );
+		requestHeaders.Authorization = `Basic ${ credentials }`;
+	}
 
 	if ( options?.headers ) {
 		Object.assign( requestHeaders, options.headers );
@@ -68,12 +136,28 @@ export async function makeRestGetRequest<T>(
 	const headers: Record<string, string> = {
 		Accept: 'application/json'
 	};
-	const token = OAUTH_TOKEN();
-	if ( needAuth && token !== undefined ) {
-		headers.Authorization = `Bearer ${ token }`;
+
+	// Add MediaWiki authentication parameters if needed
+	let requestParams = params || {};
+	if ( needAuth ) {
+		const wikiUsername = WIKI_USERNAME();
+		const wikiPassword = WIKI_PASSWORD();
+		const loginToken = await getLoginToken();
+
+		if ( wikiUsername && wikiPassword && loginToken ) {
+			requestParams = {
+				...requestParams,
+				lgname: wikiUsername,
+				lgpassword: wikiPassword,
+				lgtoken: loginToken
+			};
+		} else {
+			throw new Error( 'Wiki authentication credentials or token not available' );
+		}
 	}
+
 	const response = await fetchCore( `${ WIKI_SERVER() }${ SCRIPT_PATH() }/rest.php${ path }`, {
-		params: params,
+		params: requestParams,
 		headers: headers
 	} );
 	return ( await response.json() ) as T;
@@ -88,14 +172,31 @@ export async function makeRestPutRequest<T>(
 		Accept: 'application/json',
 		'Content-Type': 'application/json'
 	};
-	const token = OAUTH_TOKEN();
-	if ( needAuth && token !== undefined ) {
-		headers.Authorization = `Bearer ${ token }`;
+
+	let requestBody = { ...body };
+
+	// Add MediaWiki authentication parameters if needed
+	if ( needAuth ) {
+		const wikiUsername = WIKI_USERNAME();
+		const wikiPassword = WIKI_PASSWORD();
+		const loginToken = await getLoginToken();
+
+		if ( wikiUsername && wikiPassword && loginToken ) {
+			requestBody = {
+				...requestBody,
+				lgname: wikiUsername,
+				lgpassword: wikiPassword,
+				lgtoken: loginToken
+			};
+		} else {
+			throw new Error( 'Wiki authentication credentials or token not available' );
+		}
 	}
+
 	const response = await fetchCore( `${ WIKI_SERVER() }${ SCRIPT_PATH() }/rest.php${ path }`, {
 		headers: headers,
 		method: 'PUT',
-		body: body
+		body: requestBody
 	} );
 	return ( await response.json() ) as T;
 }
@@ -109,14 +210,31 @@ export async function makeRestPostRequest<T>(
 		Accept: 'application/json',
 		'Content-Type': 'application/json'
 	};
-	const token = OAUTH_TOKEN();
-	if ( needAuth && token !== undefined ) {
-		headers.Authorization = `Bearer ${ token }`;
+
+	let requestBody = body ? { ...body } : {};
+
+	// Add MediaWiki authentication parameters if needed
+	if ( needAuth ) {
+		const wikiUsername = WIKI_USERNAME();
+		const wikiPassword = WIKI_PASSWORD();
+		const loginToken = await getLoginToken();
+
+		if ( wikiUsername && wikiPassword && loginToken ) {
+			requestBody = {
+				...requestBody,
+				lgname: wikiUsername,
+				lgpassword: wikiPassword,
+				lgtoken: loginToken
+			};
+		} else {
+			throw new Error( 'Wiki authentication credentials or token not available' );
+		}
 	}
+
 	const response = await fetchCore( `${ WIKI_SERVER() }${ SCRIPT_PATH() }/rest.php${ path }`, {
 		headers: headers,
 		method: 'POST',
-		body: body
+		body: requestBody
 	} );
 	return ( await response.json() ) as T;
 }

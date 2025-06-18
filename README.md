@@ -7,7 +7,7 @@ An MCP (Model Context Protocol) server that enables Large Language Model (LLM) c
 
 ### Tools
 
-> 🔐 **Requires OAuth 2.0 token:** Request from the `Special:OAuthConsumerRegistration/propose/oauth2` page on the wiki.
+> 🔐 **Requires authentication:** Uses basic authentication and MediaWiki login tokens for secure API access.
 
 | Name | Description | 
 |---|---|
@@ -26,7 +26,10 @@ An MCP (Model Context Protocol) server that enables Large Language Model (LLM) c
 | `WIKI_SERVER` | Domain of the wiki (e.g. `https://en.wikipedia.org`) |
 | `ARTICLE_PATH` | Article path of the wiki (e.g. `/wiki`) |
 | `SCRIPT_PATH` | Script path of the wiki (e.g. `/w`) |
-| `OAUTH_TOKEN` | OAuth token from the [OAuth extension](https://www.mediawiki.org/wiki/Special:MyLanguage/Extension:OAuth) |
+| `BASIC_AUTH_USERNAME` | Username for basic HTTP authentication |
+| `BASIC_AUTH_PASSWORD` | Password for basic HTTP authentication |
+| `WIKI_USERNAME` | MediaWiki username for API authentication |
+| `WIKI_PASSWORD` | MediaWiki password for API authentication |
 
 ## Installation
 

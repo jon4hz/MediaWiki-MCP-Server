@@ -2,15 +2,21 @@ interface AppConfig {
 	WIKI_SERVER: string;
 	ARTICLE_PATH: string;
 	SCRIPT_PATH: string;
-	OAUTH_TOKEN?: string;
+	BASIC_AUTH_USERNAME?: string;
+	BASIC_AUTH_PASSWORD?: string;
+	WIKI_USERNAME?: string;
+	WIKI_PASSWORD?: string;
 }
 
-// TODO: Need better handling for OAUTH_TOKEN since it will be different for each wiki.
+// TODO: Need better handling for credentials since they will be different for each wiki.
 const defaultConfig: AppConfig = {
 	WIKI_SERVER: process.env.WIKI_SERVER || 'https://en.wikipedia.org',
 	ARTICLE_PATH: process.env.ARTICLE_PATH || '/wiki',
 	SCRIPT_PATH: process.env.SCRIPT_PATH || '/w',
-	OAUTH_TOKEN: process.env.OAUTH_TOKEN || undefined
+	BASIC_AUTH_USERNAME: process.env.BASIC_AUTH_USERNAME || undefined,
+	BASIC_AUTH_PASSWORD: process.env.BASIC_AUTH_PASSWORD || undefined,
+	WIKI_USERNAME: process.env.WIKI_USERNAME || undefined,
+	WIKI_PASSWORD: process.env.WIKI_PASSWORD || undefined
 };
 
 let currentConfig: AppConfig = { ...defaultConfig };
@@ -42,11 +48,24 @@ export function resetConfig(): void {
 export const WIKI_SERVER = (): string => getConfig().WIKI_SERVER;
 export const ARTICLE_PATH = (): string => getConfig().ARTICLE_PATH;
 export const SCRIPT_PATH = (): string => getConfig().SCRIPT_PATH;
-export const OAUTH_TOKEN = (): string|undefined => {
-	const token = getConfig().OAUTH_TOKEN;
-	return isTokenValid( token ) ? token : undefined;
+
+export const BASIC_AUTH_USERNAME = (): string|undefined => {
+	const username = getConfig().BASIC_AUTH_USERNAME;
+	return isInputValid( username ) ? username : undefined;
+};
+export const BASIC_AUTH_PASSWORD = (): string|undefined => {
+	const password = getConfig().BASIC_AUTH_PASSWORD;
+	return isInputValid( password ) ? password : undefined;
+};
+export const WIKI_USERNAME = (): string|undefined => {
+	const username = getConfig().WIKI_USERNAME;
+	return isInputValid( username ) ? username : undefined;
+};
+export const WIKI_PASSWORD = (): string|undefined => {
+	const password = getConfig().WIKI_PASSWORD;
+	return isInputValid( password ) ? password : undefined;
 };
 
-function isTokenValid( token: string | undefined ): boolean {
-	return token !== undefined && token !== null && token !== '';
+function isInputValid( input: string | undefined ): boolean {
+	return input !== undefined && input !== null && input !== '';
 }
