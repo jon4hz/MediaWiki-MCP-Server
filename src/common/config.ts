@@ -1,3 +1,8 @@
+import { config } from 'dotenv';
+
+// Load environment variables from .env file
+config();
+
 interface AppConfig {
 	WIKI_SERVER: string;
 	ARTICLE_PATH: string;
