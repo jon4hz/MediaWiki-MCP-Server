@@ -9,7 +9,7 @@ let cachedLoginToken: string | null = null;
 let isLoggedIn: boolean = false;
 
 // Global variable to store session cookies
-let sessionCookies: string[] = [];
+let sessionCookies: string = '';
 
 // Global variable to store edit token
 let cachedEditToken: string | null = null;
@@ -85,7 +85,7 @@ export function clearLoginToken(): void {
 	cachedLoginToken = null;
 	cachedEditToken = null;
 	isLoggedIn = false;
-	sessionCookies = [];
+	sessionCookies = '';
 }
 
 // Function to perform login request to establish session
@@ -124,16 +124,19 @@ async function loginRequest(): Promise<void> {
 		// Store session cookies from login response
 		const setCookieHeaders = response.headers.raw()[ 'set-cookie' ];
 		if ( setCookieHeaders ) {
-			sessionCookies = setCookieHeaders;
+			// Parse cookies from set-cookie headers
+			const cookies = setCookieHeaders.map( ( cookie ) => {
+				// Extract just the cookie name=value part (before the first semicolon)
+				const cookiePart = cookie.split( ';' )[ 0 ];
+				return cookiePart;
+			} );
+			sessionCookies = cookies.join( '; ' );
 		}
 
 		const data = await response.json() as MediaWikiLoginResponse;
 
-		// Check for login errors
-		if ( data.login?.result !== 'Success' ) {
-			const reason = data.login?.reason || 'Unknown error';
-			throw new Error( `Login failed: ${ reason }` );
-		}
+		// Check for login errors using the error checking function
+		checkApiForError( data, 'login' );
 
 		// Set login to be done
 		isLoggedIn = true;
@@ -155,7 +158,7 @@ async function fetchEditToken(): Promise<string | null> {
 	try {
 		// Ensure we're logged in before getting edit token
 		await loginRequest();
-		
+
 		const response = await fetchCore(
 			`${ WIKI_SERVER() }${ SCRIPT_PATH() }/api.php`,
 			{
@@ -224,7 +227,7 @@ async function fetchCore(
 
 	// Add session cookies if available
 	if ( sessionCookies.length > 0 ) {
-		requestHeaders.Cookie = sessionCookies.join( '; ' );
+		requestHeaders.Cookie = sessionCookies;
 	}
 
 	const fetchOptions: { headers: Record<string, string>; method?: string; body?: string } = {
@@ -253,6 +256,34 @@ async function fetchCore(
 	return response;
 }
 
+// Function to check MediaWiki API response for errors
+function checkApiForError( data: unknown, requestType: string ): void {
+	if ( !data ) {
+		throw new Error( `${ requestType } not successful: No data returned from API` );
+	}
+
+	// Type guard to check if data is an object
+	if ( typeof data !== 'object' || data === null ) {
+		throw new Error( `${ requestType } not successful: Invalid response format` );
+	}
+
+	const responseData = data as Record<string, unknown>;
+
+	// Check if the specific request type exists in the response
+	if ( responseData[ requestType ] !== undefined ) {
+		const requestData = responseData[ requestType ] as Record<string, unknown>;
+		// Check if result is "Success"
+		if ( requestData.result !== 'Success' ) {
+			const errorInfo = JSON.stringify( data );
+			throw new Error( `${ requestType } not successful: ${ errorInfo }` );
+		}
+	} else {
+		// If the request type field is missing, it's also an error
+		const errorInfo = JSON.stringify( data );
+		throw new Error( `${ requestType } not successful: ${ errorInfo }` );
+	}
+}
+
 export async function makeApiRequest<T>(
 	url: string,
 	params?: Record<string, string>,
@@ -262,11 +293,19 @@ export async function makeApiRequest<T>(
 
 	// Add MediaWiki authentication parameters if needed
 	if ( needAuth ) {
-		// Ensure we're logged in before making authenticated requests
-		await loginRequest();
-		
-		// After login, we rely on session cookies for authentication
-		// No need to send credentials with every request
+		// Use retry mechanism for authenticated requests
+		return await retryWithLogin( async () => {
+			// Ensure we're logged in before making authenticated requests
+			await loginRequest();
+
+			// After login, we rely on session cookies for authentication
+			// No need to send credentials with every request
+			const response = await fetchCore( url, {
+				params: requestParams,
+				headers: { Accept: 'application/json' }
+			} );
+			return ( await response.json() ) as T;
+		} );
 	}
 
 	const response = await fetchCore( url, {
@@ -288,11 +327,19 @@ export async function makeRestGetRequest<T>(
 	// Add MediaWiki authentication parameters if needed
 	const requestParams = params || {};
 	if ( needAuth ) {
-		// Ensure we're logged in before making authenticated requests
-		await loginRequest();
-		
-		// After login, we rely on session cookies for authentication
-		// No need to send credentials with every request
+		// Use retry mechanism for authenticated requests
+		return await retryWithLogin( async () => {
+			// Ensure we're logged in before making authenticated requests
+			await loginRequest();
+
+			// After login, we rely on session cookies for authentication
+			// No need to send credentials with every request
+			const response = await fetchCore( `${ WIKI_SERVER() }${ SCRIPT_PATH() }/rest.php${ path }`, {
+				params: requestParams,
+				headers: headers
+			} );
+			return ( await response.json() ) as T;
+		} );
 	}
 
 	const response = await fetchCore( `${ WIKI_SERVER() }${ SCRIPT_PATH() }/rest.php${ path }`, {
@@ -316,11 +363,20 @@ export async function makeRestPutRequest<T>(
 
 	// Add MediaWiki authentication parameters if needed
 	if ( needAuth ) {
-		// Ensure we're logged in before making authenticated requests
-		await loginRequest();
-		
-		// After login, we rely on session cookies for authentication
-		// No need to send credentials with every request
+		// Use retry mechanism for authenticated requests
+		return await retryWithLogin( async () => {
+			// Ensure we're logged in before making authenticated requests
+			await loginRequest();
+
+			// After login, we rely on session cookies for authentication
+			// No need to send credentials with every request
+			const response = await fetchCore( `${ WIKI_SERVER() }${ SCRIPT_PATH() }/rest.php${ path }`, {
+				headers: headers,
+				method: 'PUT',
+				body: requestBody
+			} );
+			return ( await response.json() ) as T;
+		} );
 	}
 
 	const response = await fetchCore( `${ WIKI_SERVER() }${ SCRIPT_PATH() }/rest.php${ path }`, {
@@ -345,11 +401,20 @@ export async function makeRestPostRequest<T>(
 
 	// Add MediaWiki authentication parameters if needed
 	if ( needAuth ) {
-		// Ensure we're logged in before making authenticated requests
-		await loginRequest();
-		
-		// After login, we rely on session cookies for authentication
-		// No need to send credentials with every request
+		// Use retry mechanism for authenticated requests
+		return await retryWithLogin( async () => {
+			// Ensure we're logged in before making authenticated requests
+			await loginRequest();
+
+			// After login, we rely on session cookies for authentication
+			// No need to send credentials with every request
+			const response = await fetchCore( `${ WIKI_SERVER() }${ SCRIPT_PATH() }/rest.php${ path }`, {
+				headers: headers,
+				method: 'POST',
+				body: requestBody
+			} );
+			return ( await response.json() ) as T;
+		} );
 	}
 
 	const response = await fetchCore( `${ WIKI_SERVER() }${ SCRIPT_PATH() }/rest.php${ path }`, {
@@ -384,4 +449,29 @@ export async function fetchImageAsBase64( url: string ): Promise<string | null> 
 
 export function getPageUrl( title: string ): string {
 	return `${ WIKI_SERVER() }${ ARTICLE_PATH() }/${ encodeURIComponent( title ) }`;
+}
+
+// Function to handle session timeout and retry login if needed
+async function retryWithLogin<T>( operation: () => Promise<T> ): Promise<T> {
+	try {
+		return await operation();
+	} catch ( error ) {
+		const errorMessage = ( error as Error ).message;
+
+		// Check if the error indicates session timeout or authentication failure
+		if ( errorMessage.includes( 'session most likely timed out' ) ||
+			errorMessage.includes( 'badtoken' ) ||
+			errorMessage.includes( 'permissiondenied' ) ) {
+
+			// Clear cached session data and retry login
+			clearLoginToken();
+			await loginRequest();
+
+			// Retry the operation
+			return await operation();
+		} else {
+			// Re-throw the error if it's not authentication related
+			throw error;
+		}
+	}
 }
